@@ -1,7 +1,17 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
+import requests
+
+# Yahoo Finance 차단 우회: 브라우저처럼 위장
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+})
 
 st.set_page_config(page_title="주식 비교 봇", layout="wide")
 st.title("주식 비교 봇")
@@ -15,13 +25,13 @@ symbols_input = st.text_input(
 def is_korean_stock(symbol):
     return symbol.endswith(".KS") or symbol.endswith(".KQ")
 
-def clean_krx_symbol(symbol):
-    return symbol.replace(".KS", "").replace(".KQ", "")
+def get_ticker(symbol):
+    return yf.Ticker(symbol, session=session)
 
 def get_stock_name(symbol, info=None):
     try:
         if info is None:
-            info = yf.Ticker(symbol).info
+            info = get_ticker(symbol).info
         return info.get("longName") or info.get("shortName") or symbol
     except:
         return symbol
@@ -115,59 +125,8 @@ def format_ebitda(value, symbol):
     except:
         return str(value)
 
-def get_korean_stock_data(symbol):
-    yf_ticker = yf.Ticker(symbol)
-    info = yf_ticker.info
-    stock_name = get_stock_name(symbol, info)
-
-    current_price = info.get("currentPrice") or info.get("regularMarketPrice")
-    high_52 = info.get("fiftyTwoWeekHigh")
-    low_52 = info.get("fiftyTwoWeekLow")
-
-    drop_from_high = None
-    if current_price is not None and high_52 not in [None, 0]:
-        drop_from_high = ((high_52 - current_price) / high_52) * 100
-
-    return {
-        "종목명": stock_name,
-        "종목코드": symbol,
-        "통화": "KRW",
-
-        "52주 최고가_raw": high_52,
-        "52주 최저가_raw": low_52,
-        "최고가대비하락률_raw": drop_from_high,
-        "평가금액_raw": current_price,
-        "PER_raw": info.get("trailingPE"),
-        "EPS_raw": info.get("trailingEps"),
-        "시가총액_raw": info.get("marketCap"),
-        "PBR_raw": info.get("priceToBook"),
-        "BPS_raw": info.get("bookValue"),
-        "ROA_raw": info.get("returnOnAssets"),
-        "ROE_raw": info.get("returnOnEquity"),
-        "EV/EBITDA_raw": info.get("enterpriseToEbitda"),
-        "EBITDA_raw": info.get("ebitda"),
-        "배당금_raw": info.get("dividendRate"),
-        "배당율_raw": info.get("dividendYield"),
-
-        "52주 최고가": format_price(high_52, symbol),
-        "52주 최저가": format_price(low_52, symbol),
-        "최고가대비하락률": format_drop_percent(drop_from_high),
-        "평가금액": format_price(current_price, symbol),
-        "PER": format_number(info.get("trailingPE")),
-        "EPS": format_price(info.get("trailingEps"), symbol),
-        "시가총액": format_market_cap(info.get("marketCap"), symbol),
-        "PBR": format_number(info.get("priceToBook")),
-        "BPS": format_price(info.get("bookValue"), symbol),
-        "ROA": format_percent(info.get("returnOnAssets")),
-        "ROE": format_percent(info.get("returnOnEquity")),
-        "EV/EBITDA": format_number(info.get("enterpriseToEbitda")),
-        "EBITDA": format_ebitda(info.get("ebitda"), symbol),
-        "배당금": format_price(info.get("dividendRate"), symbol),
-        "배당율": format_dividend_yield(info.get("dividendYield")),
-    }
-
-def get_us_stock_data(symbol):
-    ticker = yf.Ticker(symbol)
+def get_stock_data(symbol):
+    ticker = get_ticker(symbol)
     info = ticker.info
     stock_name = get_stock_name(symbol, info)
 
@@ -179,10 +138,12 @@ def get_us_stock_data(symbol):
     if current_price is not None and high_52 not in [None, 0]:
         drop_from_high = ((high_52 - current_price) / high_52) * 100
 
+    currency = "KRW" if is_korean_stock(symbol) else "USD"
+
     return {
         "종목명": stock_name,
         "종목코드": symbol,
-        "통화": "USD",
+        "통화": currency,
 
         "52주 최고가_raw": high_52,
         "52주 최저가_raw": low_52,
@@ -221,18 +182,16 @@ if st.button("조회"):
     symbols = [s.strip() for s in symbols_input.split(",") if s.strip()]
     rows = []
 
-    for symbol in symbols:
-        try:
-            if is_korean_stock(symbol):
-                rows.append(get_korean_stock_data(symbol))
-            else:
-                rows.append(get_us_stock_data(symbol))
-        except Exception as e:
-            rows.append({
-                "종목명": symbol,
-                "종목코드": symbol,
-                "오류": str(e)
-            })
+    with st.spinner("데이터 불러오는 중..."):
+        for symbol in symbols:
+            try:
+                rows.append(get_stock_data(symbol))
+            except Exception as e:
+                rows.append({
+                    "종목명": symbol,
+                    "종목코드": symbol,
+                    "오류": str(e)
+                })
 
     df = pd.DataFrame(rows)
 

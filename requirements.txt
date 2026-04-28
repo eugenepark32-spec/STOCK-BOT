@@ -1,5 +1,5 @@
+setuptools>=65
 streamlit
 pandas
 yfinance
 pykrx
-setuptools>=65

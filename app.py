@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import requests
 
 # -----------------------------
 # 기본 설정
@@ -24,141 +23,111 @@ def is_korean_stock(symbol):
 def format_price(value, symbol):
     if value is None or pd.isna(value):
         return "-"
-    try:
-        if is_korean_stock(symbol):
-            return f"{value:,.0f}원"
-        else:
-            return f"${value:,.2f}"
-    except:
-        return str(value)
+    return f"{value:,.0f}원" if is_korean_stock(symbol) else f"${value:,.2f}"
 
-def format_number(value, digits=2):
+def format_number(value):
     if value is None or pd.isna(value):
         return "-"
-    try:
-        return f"{value:,.{digits}f}"
-    except:
-        return str(value)
+    return f"{value:,.2f}"
 
 def format_percent(value):
     if value is None or pd.isna(value):
         return "-"
-    try:
-        return f"{value * 100:.2f}%"
-    except:
-        return str(value)
-
-def format_dividend_yield(value):
-    if value is None or pd.isna(value):
-        return "-"
-    try:
-        return f"{value * 100:.2f}%"
-    except:
-        return str(value)
+    return f"{value * 100:.2f}%"
 
 def format_drop_percent(value):
     if value is None or pd.isna(value):
         return "-"
-    try:
-        return f"{value:.2f}%"
-    except:
-        return str(value)
-
-def format_market_cap(value, symbol):
-    if value is None or pd.isna(value):
-        return "-"
-    try:
-        if is_korean_stock(symbol):
-            return f"{value / 1_0000_0000_0000:.2f}조 원"
-        else:
-            return f"${value / 1_000_000_000:.2f}B"
-    except:
-        return str(value)
-
-def format_ebitda(value, symbol):
-    if value is None or pd.isna(value):
-        return "-"
-    try:
-        if is_korean_stock(symbol):
-            return f"{value / 1_0000_0000_0000:.2f}조 원"
-        else:
-            return f"${value / 1_000_000_000:.2f}B"
-    except:
-        return str(value)
+    return f"{value:.2f}%"
 
 # -----------------------------
-# 핵심 데이터 함수 (안정 구조)
+# 핵심 데이터 함수
 # -----------------------------
 @st.cache_data(ttl=600)
 def get_stock_data(symbol):
     ticker = yf.Ticker(symbol)
 
-    # 기본 구조 (절대 깨지지 않음)
     data = {
         "종목명": symbol,
         "종목코드": symbol,
         "통화": "KRW" if is_korean_stock(symbol) else "USD",
 
+        "평가금액": "-",
         "52주 최고가": "-",
         "52주 최저가": "-",
         "최고가대비하락률": "-",
-        "평가금액": "-",
 
         "PER": "-",
         "EPS": "-",
-        "시가총액": "-",
         "PBR": "-",
         "BPS": "-",
-        "ROA": "-",
         "ROE": "-",
-        "EV/EBITDA": "-",
-        "EBITDA": "-",
-        "배당금": "-",
-        "배당율": "-"
+        "시가총액": "-"
     }
 
+    price = None  # 계산용
+
     # -----------------------------
-    # 1️⃣ 안정 데이터 (가격)
+    # 1️⃣ 가격 데이터 (안정)
     # -----------------------------
     try:
         hist = ticker.history(period="1y")
 
         if not hist.empty:
-            current_price = hist["Close"].iloc[-1]
-            high_52 = hist["High"].max()
-            low_52 = hist["Low"].min()
+            price = hist["Close"].iloc[-1]
+            high = hist["High"].max()
+            low = hist["Low"].min()
 
-            drop = ((high_52 - current_price) / high_52) * 100 if high_52 else None
+            drop = ((high - price) / high) * 100 if high else None
 
             data.update({
-                "평가금액": format_price(current_price, symbol),
-                "52주 최고가": format_price(high_52, symbol),
-                "52주 최저가": format_price(low_52, symbol),
+                "평가금액": format_price(price, symbol),
+                "52주 최고가": format_price(high, symbol),
+                "52주 최저가": format_price(low, symbol),
                 "최고가대비하락률": format_drop_percent(drop),
             })
     except:
         pass
 
     # -----------------------------
-    # 2️⃣ 보조 데이터 (재무)
+    # 2️⃣ 재무 데이터 (직접 계산)
     # -----------------------------
     try:
-        info = ticker.get_info()
+        fin = ticker.financials
+        bs = ticker.balance_sheet
+        fast = ticker.fast_info
 
-        data.update({
-            "종목명": info.get("longName") or info.get("shortName") or symbol,
-            "PER": format_number(info.get("trailingPE")),
-            "EPS": format_price(info.get("trailingEps"), symbol),
-            "시가총액": format_market_cap(info.get("marketCap"), symbol),
-            "PBR": format_number(info.get("priceToBook")),
-            "BPS": format_price(info.get("bookValue"), symbol),
-            "ROA": format_percent(info.get("returnOnAssets")),
-            "ROE": format_percent(info.get("returnOnEquity")),
-            "EV/EBITDA": format_number(info.get("enterpriseToEbitda")),
-            "EBITDA": format_ebitda(info.get("ebitda"), symbol),
-            "배당금": format_price(info.get("dividendRate"), symbol),
-            "배당율": format_dividend_yield(info.get("dividendYield")),
-        })
+        if not fin.empty and not bs.empty:
+            net_income = fin.loc["Net Income"].iloc[0]
+            equity = bs.loc["Total Stockholder Equity"].iloc[0]
+
+            shares = fast.get("shares")
+
+            if shares and price:
+                eps = net_income / shares
+                bps = equity / shares
+
+                data["EPS"] = format_price(eps, symbol)
+                data["BPS"] = format_price(bps, symbol)
+
+                if eps != 0:
+                    data["PER"] = format_number(price / eps)
+
+                if bps != 0:
+                    data["PBR"] = format_number(price / bps)
+
+            if equity != 0:
+                data["ROE"] = format_percent(net_income / equity)
+
+        # 시총
+        if fast.get("market_cap"):
+            mc = fast.get("market_cap")
+            data["시가총액"] = (
+                f"{mc/1_0000_0000_0000:.2f}조원"
+                if is_korean_stock(symbol)
+                else f"${mc/1_000_000_000:.2f}B"
+            )
+
     except:
         pass
 
@@ -181,20 +150,28 @@ if st.button("조회"):
 
     display_columns = [
         "종목명", "종목코드", "통화",
-        "52주 최고가", "52주 최저가", "최고가대비하락률",
-        "평가금액", "PER", "EPS", "시가총액", "PBR", "BPS",
-        "ROA", "ROE", "EV/EBITDA", "EBITDA", "배당금", "배당율"
+        "평가금액", "52주 최고가", "52주 최저가", "최고가대비하락률",
+        "PER", "EPS", "PBR", "BPS", "ROE", "시가총액"
     ]
 
     st.dataframe(df[display_columns], use_container_width=True)
 
     # -----------------------------
-    # 정렬 기능
+    # 정렬
     # -----------------------------
-    if "ROE" in df.columns:
-        st.subheader("ROE 높은 순")
-        st.dataframe(df.sort_values("ROE", ascending=False), use_container_width=True)
+    try:
+        df_numeric = df.copy()
+        df_numeric["ROE_num"] = df["ROE"].str.replace("%", "").astype(float)
 
-    if "PER" in df.columns:
+        st.subheader("ROE 높은 순")
+        st.dataframe(df_numeric.sort_values("ROE_num", ascending=False)[display_columns])
+    except:
+        pass
+
+    try:
+        df_numeric["PER_num"] = df["PER"].astype(float)
+
         st.subheader("PER 낮은 순")
-        st.dataframe(df.sort_values("PER", ascending=True), use_container_width=True)
+        st.dataframe(df_numeric.sort_values("PER_num")[display_columns])
+    except:
+        pass

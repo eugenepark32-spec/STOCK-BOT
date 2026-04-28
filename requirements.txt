@@ -1,5 +1,5 @@
 setuptools>=65
+pykrx==1.0.47
 streamlit
 pandas
 yfinance
-pykrx

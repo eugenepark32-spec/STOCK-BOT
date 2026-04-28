@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from pykrx import stock
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="주식 비교 봇", layout="wide")
@@ -21,14 +20,9 @@ def clean_krx_symbol(symbol):
 
 def get_stock_name(symbol, info=None):
     try:
-        if is_korean_stock(symbol):
-            ticker = clean_krx_symbol(symbol)
-            name = stock.get_market_ticker_name(ticker)
-            return name if name else symbol
-        else:
-            if info is None:
-                info = yf.Ticker(symbol).info
-            return info.get("longName") or info.get("shortName") or symbol
+        if info is None:
+            info = yf.Ticker(symbol).info
+        return info.get("longName") or info.get("shortName") or symbol
     except:
         return symbol
 
@@ -121,46 +115,14 @@ def format_ebitda(value, symbol):
     except:
         return str(value)
 
-def get_kr_52week_range(ticker):
-    end = datetime.today()
-    start = end - timedelta(days=370)
-
-    df = stock.get_market_ohlcv_by_date(
-        start.strftime("%Y%m%d"),
-        end.strftime("%Y%m%d"),
-        ticker,
-        adjusted=False
-    )
-
-    if df.empty:
-        return None, None, None
-
-    current_price = df["종가"].iloc[-1]
-    high_52 = df["고가"].max()
-    low_52 = df["저가"].min()
-
-    return current_price, high_52, low_52
-
 def get_korean_stock_data(symbol):
-    ticker = clean_krx_symbol(symbol)
-
-    try:
-        current_price, high_52, low_52 = get_kr_52week_range(ticker)
-    except:
-        current_price, high_52, low_52 = None, None, None
-
     yf_ticker = yf.Ticker(symbol)
     info = yf_ticker.info
     stock_name = get_stock_name(symbol, info)
 
-    if current_price is None:
-        current_price = info.get("currentPrice") or info.get("regularMarketPrice")
-
-    if high_52 is None:
-        high_52 = info.get("fiftyTwoWeekHigh")
-
-    if low_52 is None:
-        low_52 = info.get("fiftyTwoWeekLow")
+    current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+    high_52 = info.get("fiftyTwoWeekHigh")
+    low_52 = info.get("fiftyTwoWeekLow")
 
     drop_from_high = None
     if current_price is not None and high_52 not in [None, 0]:
